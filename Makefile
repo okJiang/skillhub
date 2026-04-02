@@ -11,10 +11,15 @@ DEV_SCANNER_URL := http://localhost:8000
 STAGING_API_URL := http://localhost:8080
 STAGING_WEB_URL := http://localhost
 STAGING_SERVER_IMAGE := skillhub-server:staging
+POSTGRES_IMAGE ?= swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/postgres:16-alpine
+REDIS_IMAGE ?= swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/redis:7-alpine
+MINIO_IMAGE ?= swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/minio/minio:latest
+PYTHON_BASE_IMAGE ?= swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-alpine
 DEV_PROCESS := bash scripts/dev-process.sh
 DEV_SERVER_PREPARE := true
 DEV_SERVER_CMD := ./scripts/run-dev-app.sh
 DEV_SERVER_SCANNER_ENV := SKILLHUB_SECURITY_SCANNER_ENABLED=true SKILLHUB_SECURITY_SCANNER_URL=$(DEV_SCANNER_URL) SKILLHUB_SECURITY_SCANNER_MODE=upload
+PNPM ?= $(shell if command -v pnpm >/dev/null 2>&1; then printf '%s' pnpm; else printf '%s' 'npx --yes pnpm@9'; fi)
 BACKEND_TEST_JAVA_OPTIONS ?= -XX:+EnableDynamicAgentLoading
 PARALLEL_BASE_REF ?= origin/main
 PARALLEL_WORKTREE_ROOT ?=
@@ -23,6 +28,8 @@ STAGING_COMPOSE_PROJECT_NAME ?= skillhub-staging
 DEV_COMPOSE := docker compose -p $(DEV_COMPOSE_PROJECT_NAME)
 STAGING_BASE_COMPOSE := docker compose -p $(STAGING_COMPOSE_PROJECT_NAME)
 STAGING_COMPOSE := $(STAGING_BASE_COMPOSE) -f docker-compose.yml -f docker-compose.staging.yml
+LOCAL_CURL := curl --noproxy '*' -sf
+export POSTGRES_IMAGE REDIS_IMAGE MINIO_IMAGE PYTHON_BASE_IMAGE
 
 help: ## 显示帮助
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -48,13 +55,13 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 		echo "Frontend already running with PID $$(cat $(DEV_WEB_PID))"; \
 	else \
 		echo "Starting frontend..."; \
-		$(DEV_PROCESS) start --pid-file $(DEV_WEB_PID) --log-file $(DEV_WEB_LOG) --cwd web -- pnpm exec vite --host 0.0.0.0 --strictPort >/dev/null; \
+		$(DEV_PROCESS) start --pid-file $(DEV_WEB_PID) --log-file $(DEV_WEB_LOG) --cwd web -- $(PNPM) exec vite --host 0.0.0.0 --strictPort >/dev/null; \
 	fi
 	@echo "Waiting for backend on $(DEV_API_URL) ..."
 	@backend_ready=0; \
 	for attempt in 1 2; do \
 		for i in $$(seq 1 30); do \
-			if curl -sf $(DEV_API_URL)/actuator/health >/dev/null; then \
+			if $(LOCAL_CURL) $(DEV_API_URL)/actuator/health >/dev/null; then \
 				echo "Backend ready."; \
 				backend_ready=1; \
 				break 2; \
@@ -78,7 +85,7 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 	@echo "Waiting for scanner on $(DEV_SCANNER_URL) ..."
 	@scanner_ready=0; \
 	for i in $$(seq 1 30); do \
-		if curl -sf $(DEV_SCANNER_URL)/health >/dev/null; then \
+		if $(LOCAL_CURL) $(DEV_SCANNER_URL)/health >/dev/null; then \
 			echo "Scanner ready."; \
 			scanner_ready=1; \
 			break; \
@@ -92,7 +99,7 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 	@echo "Waiting for frontend on $(DEV_WEB_URL) ..."
 	@frontend_ready=0; \
 	for i in $$(seq 1 60); do \
-		if curl -sf $(DEV_WEB_URL) >/dev/null; then \
+		if $(LOCAL_CURL) $(DEV_WEB_URL) >/dev/null; then \
 			echo "Frontend ready."; \
 			frontend_ready=1; \
 			break; \
@@ -123,7 +130,7 @@ dev-server-restart: ## 重启后端开发服务器
 	@$(DEV_PROCESS) start --pid-file $(DEV_SERVER_PID) --log-file $(DEV_SERVER_LOG) --cwd server -- /bin/sh -lc '$(DEV_SERVER_PREPARE) && exec env $(DEV_SERVER_SCANNER_ENV) $(DEV_SERVER_CMD)' >/dev/null
 	@echo "Waiting for backend on $(DEV_API_URL) ..."
 	@for i in $$(seq 1 30); do \
-		if curl -sf $(DEV_API_URL)/actuator/health >/dev/null; then \
+		if $(LOCAL_CURL) $(DEV_API_URL)/actuator/health >/dev/null; then \
 			echo "Backend ready."; \
 			exit 0; \
 		fi; \
@@ -203,10 +210,10 @@ clean: ## 清理构建产物
 
 generate-api: ## 生成 OpenAPI 类型（前端用）
 	@echo "Generating OpenAPI types..."
-	cd web && pnpm run generate-api
+	cd web && $(PNPM) run generate-api
 
 web-install: ## 安装前端依赖
-	cd web && pnpm install
+	cd web && $(PNPM) install
 
 web-deps: ## 确保前端依赖可用（本地开发优先复用现有 node_modules）
 	@if [ ! -d web/node_modules ]; then \
@@ -223,32 +230,32 @@ web-deps: ## 确保前端依赖可用（本地开发优先复用现有 node_modu
 	fi
 
 web-install-ci: ## 以 CI 方式安装前端依赖
-	cd web && CI=true pnpm install --frozen-lockfile
+	cd web && CI=true $(PNPM) install --frozen-lockfile
 
 dev-web: ## 启动前端开发服务器
-	cd web && pnpm run dev
+	cd web && $(PNPM) run dev
 
 build-frontend: web-deps ## 构建前端
-	cd web && pnpm run build
+	cd web && $(PNPM) run build
 
 test-frontend: web-deps ## 运行前端单元测试
-	cd web && pnpm run test
+	cd web && $(PNPM) run test
 
 test-e2e-frontend: web-deps ## 运行前端 E2E 测试（Playwright）
-	cd web && pnpm run test:e2e
+	cd web && $(PNPM) run test:e2e
 
 test-e2e-smoke-frontend: web-deps ## 运行前端 E2E smoke 测试（Playwright）
-	cd web && pnpm run test:e2e:smoke
+	cd web && $(PNPM) run test:e2e:smoke
 
 build-web: build-frontend ## 构建前端
 
 test-web: test-frontend ## 运行前端测试
 
 typecheck-web: ## 前端类型检查
-	cd web && pnpm run typecheck
+	cd web && $(PNPM) run typecheck
 
 lint-web: ## 前端代码检查
-	cd web && pnpm run lint
+	cd web && $(PNPM) run lint
 
 db-reset: ## 重置数据库
 	$(DEV_COMPOSE) down -v --remove-orphans
@@ -263,7 +270,7 @@ staging: ## 构建并启动 staging 环境，运行 smoke test（混合模式：
 	cd server && ./mvnw package -DskipTests -B -q
 	docker build -t $(STAGING_SERVER_IMAGE) -f server/Dockerfile.dev server
 	@echo "=== [2/5] Building frontend static files ==="
-	cd web && pnpm run build
+	cd web && $(PNPM) run build
 	@echo "=== [3/5] Starting dependency services ==="
 	$(STAGING_BASE_COMPOSE) up -d --wait
 	@echo "=== [4/5] Starting staging services ==="
