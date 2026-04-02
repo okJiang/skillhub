@@ -273,7 +273,8 @@ public class ReviewSkillDetailAppService {
                 request.body(),
                 userId
         ));
-        return toReviewCommentThreadResponse(savedThread, List.of(savedComment));
+        ReviewCommentResponse initialComment = toReviewCommentResponse(savedComment);
+        return toReviewCommentThreadResponse(savedThread, List.<ReviewCommentResponse>of(initialComment));
     }
 
     public ReviewCommentResponse createReviewComment(Long reviewId,
@@ -479,7 +480,7 @@ public class ReviewSkillDetailAppService {
         return threads.stream()
                 .map(thread -> toReviewCommentThreadResponse(
                         thread,
-                        commentsByThreadId.getOrDefault(thread.getId(), List.of())
+                        commentsByThreadId.getOrDefault(thread.getId(), List.<ReviewCommentResponse>of())
                 ))
                 .toList();
     }

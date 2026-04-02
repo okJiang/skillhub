@@ -119,11 +119,12 @@ class ReviewPortalControllerTest {
         stubNamespaceRoles("user-1", List.of(new NamespaceMember(20L, "user-1", NamespaceRole.MEMBER)));
         given(namespaceRepository.findById(20L)).willReturn(Optional.of(namespace));
         given(rbacService.getUserRoleCodes("user-1")).willReturn(Set.of());
-        given(permissionChecker.canManageNamespaceReviews(
-                20L,
-                namespace.getType(),
-                Map.of(20L, NamespaceRole.MEMBER),
-                Set.of())).willReturn(true);
+        given(reviewService.canReviewNamespace(
+                any(ReviewTask.class),
+                eq("user-1"),
+                eq(namespace.getType()),
+                eq(Map.of(20L, NamespaceRole.MEMBER)),
+                eq(Set.of()))).willReturn(true);
         var task = createReviewTask(1L, 20L, "user-2");
         given(reviewTaskRepository.findByNamespaceIdAndStatus(eq(20L), eq(ReviewTaskStatus.PENDING), any()))
                 .willReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 20), 1));
@@ -458,7 +459,7 @@ class ReviewPortalControllerTest {
     }
 
     private void stubReviewResponse(ReviewTask task) {
-        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(new ReviewTaskResponse(
+        ReviewTaskResponse response = new ReviewTaskResponse(
                 task.getId(),
                 task.getSkillVersionId(),
                 "team-a",
@@ -472,7 +473,9 @@ class ReviewPortalControllerTest {
                 task.getReviewComment(),
                 task.getSubmittedAt(),
                 task.getReviewedAt()
-        ));
+        );
+        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(response);
+        given(governanceQueryRepository.getReviewTaskResponses(List.of(task))).willReturn(List.of(response));
     }
 
     private void stubNamespaceRoles(String userId, List<NamespaceMember> members) {
