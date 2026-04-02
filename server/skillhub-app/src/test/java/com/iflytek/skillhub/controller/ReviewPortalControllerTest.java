@@ -46,6 +46,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -459,7 +460,16 @@ class ReviewPortalControllerTest {
     }
 
     private void stubReviewResponse(ReviewTask task) {
-        ReviewTaskResponse response = new ReviewTaskResponse(
+        ReviewTaskResponse response = toReviewTaskResponse(task);
+        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(response);
+        given(governanceQueryRepository.getReviewTaskResponses(anyList()))
+                .willAnswer(invocation -> ((List<ReviewTask>) invocation.getArgument(0)).stream()
+                        .map(this::toReviewTaskResponse)
+                        .toList());
+    }
+
+    private ReviewTaskResponse toReviewTaskResponse(ReviewTask task) {
+        return new ReviewTaskResponse(
                 task.getId(),
                 task.getSkillVersionId(),
                 "team-a",
@@ -474,8 +484,6 @@ class ReviewPortalControllerTest {
                 task.getSubmittedAt(),
                 task.getReviewedAt()
         );
-        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(response);
-        given(governanceQueryRepository.getReviewTaskResponses(List.of(task))).willReturn(List.of(response));
     }
 
     private void stubNamespaceRoles(String userId, List<NamespaceMember> members) {
