@@ -1,6 +1,9 @@
 services:
   skill-scanner:
-    build: ./scanner
+    build:
+      context: ./scanner
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-alpine}
     ports:
       - "8000:8000"
     environment:
