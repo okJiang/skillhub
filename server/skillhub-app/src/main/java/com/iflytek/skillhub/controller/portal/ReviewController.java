@@ -5,14 +5,23 @@ import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.skill.service.SkillDownloadService;
 import com.iflytek.skillhub.dto.ApiResponse;
 import com.iflytek.skillhub.dto.ApiResponseFactory;
+import com.iflytek.skillhub.dto.CreateReviewCommentRequest;
+import com.iflytek.skillhub.dto.CreateReviewCommentThreadRequest;
+import com.iflytek.skillhub.dto.CreateReviewTestRunRequest;
 import com.iflytek.skillhub.dto.PageResponse;
 import com.iflytek.skillhub.dto.ReviewActionRequest;
+import com.iflytek.skillhub.dto.ReviewCommentResponse;
+import com.iflytek.skillhub.dto.ReviewCommentThreadResponse;
 import com.iflytek.skillhub.dto.ReviewSkillDetailResponse;
+import com.iflytek.skillhub.dto.ReviewTestRunResponse;
 import com.iflytek.skillhub.dto.ReviewTaskRequest;
 import com.iflytek.skillhub.dto.ReviewTaskResponse;
+import com.iflytek.skillhub.dto.ReviewVersionSnapshotResponse;
 import com.iflytek.skillhub.service.AuditRequestContext;
 import com.iflytek.skillhub.service.GovernanceWorkflowAppService;
+import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.Map;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
@@ -150,6 +159,76 @@ public class ReviewController extends BaseApiController {
         return ok(
                 "response.success.read",
                 governanceWorkflowAppService.getReviewSkillDetail(id, userId, userNsRoles)
+        );
+    }
+
+    @GetMapping("/{id}/versions/{versionId}")
+    public ApiResponse<ReviewVersionSnapshotResponse> getReviewVersionSnapshot(@PathVariable Long id,
+                                                                               @PathVariable Long versionId,
+                                                                               @RequestAttribute("userId") String userId,
+                                                                               @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.read",
+                governanceWorkflowAppService.getReviewVersionSnapshot(id, versionId, userId, userNsRoles)
+        );
+    }
+
+    @GetMapping("/{id}/versions/{versionId}/comments")
+    public ApiResponse<List<ReviewCommentThreadResponse>> listReviewCommentThreads(@PathVariable Long id,
+                                                                                   @PathVariable Long versionId,
+                                                                                   @RequestParam String filePath,
+                                                                                   @RequestAttribute("userId") String userId,
+                                                                                   @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.read",
+                governanceWorkflowAppService.listReviewCommentThreads(id, versionId, filePath, userId, userNsRoles)
+        );
+    }
+
+    @PostMapping("/{id}/versions/{versionId}/comments")
+    public ApiResponse<ReviewCommentThreadResponse> createReviewCommentThread(@PathVariable Long id,
+                                                                              @PathVariable Long versionId,
+                                                                              @Valid @RequestBody CreateReviewCommentThreadRequest request,
+                                                                              @RequestAttribute("userId") String userId,
+                                                                              @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.created",
+                governanceWorkflowAppService.createReviewCommentThread(id, versionId, request, userId, userNsRoles)
+        );
+    }
+
+    @PostMapping("/{id}/comment-threads/{threadId}/comments")
+    public ApiResponse<ReviewCommentResponse> createReviewComment(@PathVariable Long id,
+                                                                  @PathVariable Long threadId,
+                                                                  @Valid @RequestBody CreateReviewCommentRequest request,
+                                                                  @RequestAttribute("userId") String userId,
+                                                                  @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.created",
+                governanceWorkflowAppService.createReviewComment(id, threadId, request, userId, userNsRoles)
+        );
+    }
+
+    @GetMapping("/{id}/versions/{versionId}/test-runs")
+    public ApiResponse<List<ReviewTestRunResponse>> listReviewTestRuns(@PathVariable Long id,
+                                                                       @PathVariable Long versionId,
+                                                                       @RequestAttribute("userId") String userId,
+                                                                       @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.read",
+                governanceWorkflowAppService.listReviewTestRuns(id, versionId, userId, userNsRoles)
+        );
+    }
+
+    @PostMapping("/{id}/versions/{versionId}/test-runs")
+    public ApiResponse<ReviewTestRunResponse> createReviewTestRun(@PathVariable Long id,
+                                                                  @PathVariable Long versionId,
+                                                                  @Valid @RequestBody CreateReviewTestRunRequest request,
+                                                                  @RequestAttribute("userId") String userId,
+                                                                  @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        return ok(
+                "response.success.created",
+                governanceWorkflowAppService.createReviewTestRun(id, versionId, request, userId, userNsRoles)
         );
     }
 

@@ -457,6 +457,11 @@ class ScanTaskConsumerTest {
         }
 
         @Override
+        public Optional<ReviewTask> findFirstBySkillVersionIdOrderByIdDesc(Long skillVersionId) {
+            throw unsupported();
+        }
+
+        @Override
         public Optional<ReviewTask> findBySkillVersionIdAndStatus(Long skillVersionId, ReviewTaskStatus status) {
             throw unsupported();
         }

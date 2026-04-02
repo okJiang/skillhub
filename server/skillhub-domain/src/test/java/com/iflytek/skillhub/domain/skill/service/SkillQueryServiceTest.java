@@ -1074,6 +1074,68 @@ class SkillQueryServiceTest {
                 result.getContent().stream().map(SkillVersion::getVersion).toList());
     }
 
+    @Test
+    void testGetReviewSkillSnapshot_ShouldScopeVersionsToCurrentReviewFlow() throws Exception {
+        Skill skill = new Skill(20L, "skill-a", "owner-1", SkillVisibility.PUBLIC);
+        setId(skill, 101L);
+
+        SkillVersion olderPublished = new SkillVersion(101L, "0.9.0", "owner-1");
+        setId(olderPublished, 5L);
+        olderPublished.setStatus(SkillVersionStatus.PUBLISHED);
+
+        SkillVersion oldRejected = new SkillVersion(101L, "1.0.1-rc1", "owner-1");
+        setId(oldRejected, 8L);
+        oldRejected.setStatus(SkillVersionStatus.REJECTED);
+
+        SkillVersion basePublished = new SkillVersion(101L, "1.0.0", "owner-1");
+        setId(basePublished, 10L);
+        basePublished.setStatus(SkillVersionStatus.PUBLISHED);
+
+        SkillVersion superseded = new SkillVersion(101L, "1.1.0-rc1", "owner-1");
+        setId(superseded, 12L);
+        superseded.setStatus(SkillVersionStatus.SUPERSEDED);
+
+        SkillVersion hiddenDraft = new SkillVersion(101L, "scratch", "owner-1");
+        setId(hiddenDraft, 13L);
+        hiddenDraft.setStatus(SkillVersionStatus.DRAFT);
+
+        SkillVersion active = new SkillVersion(101L, "1.1.0-rc2", "owner-1");
+        setId(active, 14L);
+        active.setStatus(SkillVersionStatus.PENDING_REVIEW);
+
+        SkillVersion hiddenYanked = new SkillVersion(101L, "0.8.0", "owner-1");
+        setId(hiddenYanked, 16L);
+        hiddenYanked.setStatus(SkillVersionStatus.YANKED);
+
+        SkillVersion futureRejected = new SkillVersion(101L, "1.1.0-rc3", "owner-1");
+        setId(futureRejected, 17L);
+        futureRejected.setStatus(SkillVersionStatus.REJECTED);
+
+        when(skillVersionRepository.findById(14L)).thenReturn(Optional.of(active));
+        when(skillRepository.findById(101L)).thenReturn(Optional.of(skill));
+        when(skillVersionRepository.findBySkillId(101L)).thenReturn(List.of(
+                futureRejected,
+                hiddenYanked,
+                active,
+                hiddenDraft,
+                superseded,
+                basePublished,
+                oldRejected,
+                olderPublished
+        ));
+        when(skillFileRepository.findByVersionId(14L)).thenReturn(List.of());
+        when(userAccountRepository.findById("owner-1")).thenReturn(Optional.empty());
+
+        SkillQueryService.ReviewSkillSnapshotDTO result = service.getReviewSkillSnapshot(14L);
+
+        assertEquals(10L, result.publishedVersion().getId());
+        assertEquals(List.of(10L, 12L, 14L),
+                result.versions().stream()
+                        .map(SkillVersion::getId)
+                        .sorted()
+                        .toList());
+    }
+
     private void setId(Object entity, Long id) throws Exception {
         Field idField = entity.getClass().getDeclaredField("id");
         idField.setAccessible(true);

@@ -7,5 +7,6 @@ public enum SkillVersionStatus {
     PENDING_REVIEW,
     PUBLISHED,
     REJECTED,
+    SUPERSEDED,
     YANKED
 }

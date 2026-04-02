@@ -88,6 +88,16 @@ const useReviewSkillDetailMock = vi.fn<() => unknown>(() => ({
         publishedAt: '2026-03-19T00:00:00Z',
         downloadAvailable: true,
       },
+      {
+        id: 9,
+        version: '1.1.0',
+        status: 'REJECTED',
+        changelog: 'Previous review revision',
+        fileCount: 2,
+        totalSize: 118,
+        publishedAt: '2026-03-18T00:00:00Z',
+        downloadAvailable: false,
+      },
     ],
     files: [],
     documentationPath: 'README.md',
@@ -99,9 +109,48 @@ const useReviewSkillDetailMock = vi.fn<() => unknown>(() => ({
   error: null,
 }))
 
+let mockTestRuns = [
+  {
+    id: 21,
+    skillVersionId: 10,
+    source: 'CI',
+    status: 'PASSED',
+    name: 'CI smoke',
+    summary: 'All checks passed',
+    detailsMarkdown: 'details',
+    externalUrl: 'https://ci.example.com/run/21',
+    createdBy: 'ci-bot',
+    createdAt: '2026-03-19T01:00:00Z',
+  },
+]
+
 vi.mock('@/features/review/use-review-detail', () => ({
   useReviewDetail: () => useReviewDetailMock(),
   useReviewSkillDetail: () => useReviewSkillDetailMock(),
+  useReviewVersionSnapshot: () => ({
+    data: null,
+    isLoading: false,
+  }),
+  useReviewCommentThreads: () => ({
+    data: [],
+    isLoading: false,
+  }),
+  useCreateReviewCommentThread: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useCreateReviewComment: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useReviewTestRuns: () => ({
+    data: mockTestRuns,
+    isLoading: false,
+  }),
+  useCreateReviewTestRun: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
   useApproveReview: () => ({
     mutate: vi.fn(),
     isPending: false,
@@ -129,6 +178,20 @@ describe('ReviewDetailPage', () => {
     navigateMock.mockReset()
     useReviewDetailMock.mockReset()
     useReviewSkillDetailMock.mockReset()
+    mockTestRuns = [
+      {
+        id: 21,
+        skillVersionId: 10,
+        source: 'CI',
+        status: 'PASSED',
+        name: 'CI smoke',
+        summary: 'All checks passed',
+        detailsMarkdown: 'details',
+        externalUrl: 'https://ci.example.com/run/21',
+        createdBy: 'ci-bot',
+        createdAt: '2026-03-19T01:00:00Z',
+      },
+    ]
     useReviewDetailMock.mockReturnValue({
       data: {
         id: 13,
@@ -176,6 +239,16 @@ describe('ReviewDetailPage', () => {
             publishedAt: '2026-03-19T00:00:00Z',
             downloadAvailable: true,
           },
+          {
+            id: 9,
+            version: '1.1.0',
+            status: 'REJECTED',
+            changelog: 'Previous review revision',
+            fileCount: 2,
+            totalSize: 118,
+            publishedAt: '2026-03-18T00:00:00Z',
+            downloadAvailable: false,
+          },
         ],
         files: [],
         documentationPath: 'README.md',
@@ -193,6 +266,10 @@ describe('ReviewDetailPage', () => {
 
     expect(html).toContain('max-w-6xl mx-auto flex')
     expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('review.revisionHistoryTitle')
+    expect(html).toContain('review.compareWithCurrent')
+    expect(html).toContain('review.testRunsTitle')
+    expect(html).toContain('CI smoke')
   })
 
   it('renders not-found state when the review record is missing', () => {
@@ -237,6 +314,16 @@ describe('ReviewDetailPage', () => {
             publishedAt: '2026-03-19T00:00:00Z',
             downloadAvailable: true,
           },
+          {
+            id: 9,
+            version: '1.1.0',
+            status: 'REJECTED',
+            changelog: 'Previous review revision',
+            fileCount: 2,
+            totalSize: 118,
+            publishedAt: '2026-03-18T00:00:00Z',
+            downloadAvailable: false,
+          },
         ],
         files: [],
         documentationPath: 'README.md',
@@ -252,5 +339,29 @@ describe('ReviewDetailPage', () => {
 
     expect(html).toContain('review.approveDisabledScanning')
     expect(html).toContain('disabled=""')
+  })
+
+  it('hides the test-run creation entry on closed reviews', () => {
+    useReviewDetailMock.mockReturnValue({
+      data: {
+        id: 13,
+        namespace: 'global',
+        skillSlug: 'demo-skill',
+        version: '1.2.0',
+        status: 'APPROVED',
+        submittedBy: 'local-admin',
+        submittedByName: 'Local Admin',
+        submittedAt: '2026-03-19T00:00:00Z',
+        reviewedBy: 'reviewer-1',
+        reviewedByName: 'Reviewer 1',
+        reviewedAt: '2026-03-19T01:00:00Z',
+        reviewComment: 'Looks good',
+      },
+      isLoading: false,
+    })
+
+    const html = renderToStaticMarkup(<ReviewDetailPage />)
+
+    expect(html).not.toContain('review.addTestRun')
   })
 })

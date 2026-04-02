@@ -20,6 +20,8 @@ import java.util.Optional;
 @Repository
 public interface ReviewTaskJpaRepository extends JpaRepository<ReviewTask, Long>, ReviewTaskRepository {
 
+    Optional<ReviewTask> findFirstBySkillVersionIdOrderByIdDesc(Long skillVersionId);
+
     Optional<ReviewTask> findBySkillVersionIdAndStatus(Long skillVersionId, ReviewTaskStatus status);
 
     Page<ReviewTask> findByStatus(ReviewTaskStatus status, Pageable pageable);

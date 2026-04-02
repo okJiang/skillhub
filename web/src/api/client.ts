@@ -1,10 +1,15 @@
 import createClient from 'openapi-fetch'
 import type { paths } from './generated/schema'
 import type {
+  CreateReviewCommentInput,
+  CreateReviewCommentThreadInput,
   ChangePasswordRequest,
+  CreateReviewTestRunInput,
   ApiToken,
   CreateTokenRequest,
   CreateTokenResponse,
+  ReviewComment,
+  ReviewCommentThread,
   MergeConfirmRequest,
   LocalLoginRequest,
   LocalRegisterRequest,
@@ -13,6 +18,8 @@ import type {
   MergeVerifyRequest,
   ReviewSkillDetail,
   ReviewTask,
+  ReviewTestRun,
+  ReviewVersionSnapshot,
   PromotionTask,
   AuditLogItem,
   SkillSummary,
@@ -756,6 +763,50 @@ export const reviewApi = {
 
   async getSkillDetail(id: number): Promise<ReviewSkillDetail> {
     return fetchJson<ReviewSkillDetail>(`${WEB_API_PREFIX}/reviews/${id}/skill-detail`)
+  },
+
+  async getVersionSnapshot(id: number, versionId: number): Promise<ReviewVersionSnapshot> {
+    return fetchJson<ReviewVersionSnapshot>(`${WEB_API_PREFIX}/reviews/${id}/versions/${versionId}`)
+  },
+
+  async listCommentThreads(id: number, versionId: number, filePath: string): Promise<ReviewCommentThread[]> {
+    const searchParams = new URLSearchParams()
+    searchParams.set('filePath', filePath)
+    return fetchJson<ReviewCommentThread[]>(`${WEB_API_PREFIX}/reviews/${id}/versions/${versionId}/comments?${searchParams.toString()}`)
+  },
+
+  async createCommentThread(id: number, versionId: number, input: CreateReviewCommentThreadInput): Promise<ReviewCommentThread> {
+    return fetchJson<ReviewCommentThread>(`${WEB_API_PREFIX}/reviews/${id}/versions/${versionId}/comments`, {
+      method: 'POST',
+      headers: getCsrfHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(input),
+    })
+  },
+
+  async replyComment(id: number, threadId: number, input: CreateReviewCommentInput): Promise<ReviewComment> {
+    return fetchJson<ReviewComment>(`${WEB_API_PREFIX}/reviews/${id}/comment-threads/${threadId}/comments`, {
+      method: 'POST',
+      headers: getCsrfHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(input),
+    })
+  },
+
+  async listTestRuns(id: number, versionId: number): Promise<ReviewTestRun[]> {
+    return fetchJson<ReviewTestRun[]>(`${WEB_API_PREFIX}/reviews/${id}/versions/${versionId}/test-runs`)
+  },
+
+  async createTestRun(id: number, versionId: number, input: CreateReviewTestRunInput): Promise<ReviewTestRun> {
+    return fetchJson<ReviewTestRun>(`${WEB_API_PREFIX}/reviews/${id}/versions/${versionId}/test-runs`, {
+      method: 'POST',
+      headers: getCsrfHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(input),
+    })
   },
 
   async approve(id: number, comment?: string): Promise<void> {

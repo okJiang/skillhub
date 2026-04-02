@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -41,6 +42,14 @@ import java.util.stream.Collectors;
  */
 @Service
 public class SkillQueryService {
+
+    private static final Set<SkillVersionStatus> REVIEW_REVISION_STATUSES = Set.of(
+            SkillVersionStatus.SCANNING,
+            SkillVersionStatus.SCAN_FAILED,
+            SkillVersionStatus.PENDING_REVIEW,
+            SkillVersionStatus.REJECTED,
+            SkillVersionStatus.SUPERSEDED
+    );
 
     private final NamespaceRepository namespaceRepository;
     private final SkillRepository skillRepository;
@@ -139,6 +148,14 @@ public class SkillQueryService {
             SkillVersion activeVersion,
             SkillVersion publishedVersion,
             List<SkillVersion> versions,
+            List<SkillFile> files,
+            String documentationPath,
+            String documentationContent
+    ) {}
+
+    public record ReviewVersionSnapshotDTO(
+            Long skillId,
+            SkillVersion version,
             List<SkillFile> files,
             String documentationPath,
             String documentationContent
@@ -335,6 +352,7 @@ public class SkillQueryService {
                             || version.getStatus() == SkillVersionStatus.PENDING_REVIEW
                             || version.getStatus() == SkillVersionStatus.DRAFT
                             || version.getStatus() == SkillVersionStatus.REJECTED
+                            || version.getStatus() == SkillVersionStatus.SUPERSEDED
                             || version.getStatus() == SkillVersionStatus.YANKED
                             || version.getStatus() == SkillVersionStatus.SCANNING
                             || version.getStatus() == SkillVersionStatus.SCAN_FAILED)
@@ -379,22 +397,10 @@ public class SkillQueryService {
                 .filter(name -> name != null && !name.isBlank())
                 .orElse(null);
 
-        List<SkillVersion> versions = skillVersionRepository.findBySkillId(skill.getId()).stream()
-                .filter(version -> version.getStatus() == SkillVersionStatus.PUBLISHED
-                        || version.getStatus() == SkillVersionStatus.PENDING_REVIEW
-                        || version.getStatus() == SkillVersionStatus.DRAFT
-                        || version.getStatus() == SkillVersionStatus.REJECTED
-                        || version.getStatus() == SkillVersionStatus.YANKED
-                        || version.getStatus() == SkillVersionStatus.SCANNING
-                        || version.getStatus() == SkillVersionStatus.SCAN_FAILED)
-                .sorted(Comparator
-                        .comparingInt((SkillVersion version) -> lifecycleListPriority(version.getStatus()))
-                        .thenComparing(SkillVersion::getPublishedAt,
-                                Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(SkillVersion::getCreatedAt,
-                                Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(SkillVersion::getId, Comparator.reverseOrder()))
-                .toList();
+        List<SkillVersion> versions = resolveReviewScopedVersions(
+                skillVersionRepository.findBySkillId(skill.getId()),
+                activeVersion
+        );
         List<SkillFile> files = availableFiles(activeVersion.getId());
         String documentationPath = resolveDocumentationPath(files);
         String documentationContent = documentationPath == null
@@ -415,6 +421,65 @@ public class SkillQueryService {
                 documentationPath,
                 documentationContent
         );
+    }
+
+    public ReviewVersionSnapshotDTO getReviewVersionSnapshot(Long skillVersionId) {
+        SkillVersion version = skillVersionRepository.findById(skillVersionId)
+                .orElseThrow(() -> new DomainBadRequestException("error.skill.version.notFound", skillVersionId));
+        List<SkillFile> files = availableFiles(version.getId());
+        String documentationPath = resolveDocumentationPath(files);
+        String documentationContent = documentationPath == null
+                ? null
+                : readTextContent(findFile(version, documentationPath));
+
+        return new ReviewVersionSnapshotDTO(
+                version.getSkillId(),
+                version,
+                files,
+                documentationPath,
+                documentationContent
+        );
+    }
+
+    private List<SkillVersion> resolveReviewScopedVersions(List<SkillVersion> allVersions, SkillVersion activeVersion) {
+        Long activeVersionId = activeVersion.getId();
+        SkillVersion baselinePublishedVersion = allVersions.stream()
+                .filter(version -> version.getStatus() == SkillVersionStatus.PUBLISHED)
+                .filter(version -> version.getId() != null && version.getId() < activeVersionId)
+                .max(Comparator.comparing(SkillVersion::getId))
+                .orElse(null);
+        Long baselineVersionId = baselinePublishedVersion != null ? baselinePublishedVersion.getId() : null;
+
+        // Bound the visible revision set to the review window for this task:
+        // start at the last published baseline before the bound revision and
+        // stop at the bound revision itself so unrelated drafts/yanks/future
+        // rounds from the same skill remain hidden from reviewers.
+        return allVersions.stream()
+                .filter(version -> isVersionVisibleInReviewScope(version, activeVersionId, baselineVersionId))
+                .sorted(Comparator
+                        .comparingInt((SkillVersion version) -> lifecycleListPriority(version.getStatus()))
+                        .thenComparing(SkillVersion::getPublishedAt,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(SkillVersion::getCreatedAt,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(SkillVersion::getId, Comparator.reverseOrder()))
+                .toList();
+    }
+
+    private boolean isVersionVisibleInReviewScope(SkillVersion version, Long activeVersionId, Long baselineVersionId) {
+        if (Objects.equals(version.getId(), activeVersionId)) {
+            return true;
+        }
+        if (baselineVersionId != null && Objects.equals(version.getId(), baselineVersionId)) {
+            return version.getStatus() == SkillVersionStatus.PUBLISHED;
+        }
+        if (version.getId() == null || version.getId() > activeVersionId) {
+            return false;
+        }
+        if (baselineVersionId != null && version.getId() < baselineVersionId) {
+            return false;
+        }
+        return REVIEW_REVISION_STATUSES.contains(version.getStatus());
     }
 
     /**
@@ -690,6 +755,9 @@ public class SkillQueryService {
             return 1;
         }
         if (status == SkillVersionStatus.REJECTED) {
+            return 2;
+        }
+        if (status == SkillVersionStatus.SUPERSEDED) {
             return 2;
         }
         if (status == SkillVersionStatus.PENDING_REVIEW) {

@@ -74,9 +74,9 @@ class ReviewPermissionCheckerTest {
     }
 
     @Test
-    void teamMemberCannotReviewTeamSkill() {
+    void teamMemberCanReviewTeamSkill() {
         ReviewTask task = new ReviewTask(1L, 10L, "user-2");
-        assertFalse(checker.canReview(task, "user-1",
+        assertTrue(checker.canReview(task, "user-1",
                 NamespaceType.TEAM,
                 Map.of(10L, NamespaceRole.MEMBER), Set.of()));
     }
@@ -137,6 +137,12 @@ class ReviewPermissionCheckerTest {
     void teamAdminCanManagePendingReviewList() {
         assertTrue(checker.canManageNamespaceReviews(
                 10L, NamespaceType.TEAM, Map.of(10L, NamespaceRole.ADMIN), Set.of()));
+    }
+
+    @Test
+    void teamMemberCanManagePendingReviewList() {
+        assertTrue(checker.canManageNamespaceReviews(
+                10L, NamespaceType.TEAM, Map.of(10L, NamespaceRole.MEMBER), Set.of()));
     }
 
     @Test

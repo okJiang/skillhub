@@ -71,7 +71,7 @@ public class ReviewPermissionChecker {
         }
 
         NamespaceRole role = userNamespaceRoles.get(namespaceId);
-        return role == NamespaceRole.OWNER || role == NamespaceRole.ADMIN;
+        return role == NamespaceRole.OWNER || role == NamespaceRole.ADMIN || role == NamespaceRole.MEMBER;
     }
 
     public boolean canManageNamespaceReviews(Long namespaceId,
