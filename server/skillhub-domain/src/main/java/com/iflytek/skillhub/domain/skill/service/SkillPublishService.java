@@ -47,6 +47,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -63,6 +64,7 @@ public class SkillPublishService {
     private static final DateTimeFormatter AUTO_VERSION_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss").withZone(ZoneId.systemDefault());
     private static final Logger log = LoggerFactory.getLogger(SkillPublishService.class);
+    private static final String SUPERSEDED_REVIEW_COMMENT = "Superseded by a newer review submission.";
 
     public record PublishResult(
             Long skillId,
@@ -253,15 +255,8 @@ public class SkillPublishService {
             throw new DomainBadRequestException("error.skill.publish.archived", skillSlug);
         }
 
-        // 6c. Auto-withdraw pending review versions
-        List<SkillVersion> pendingVersions = skillVersionRepository
-                .findBySkillIdAndStatus(skill.getId(), SkillVersionStatus.PENDING_REVIEW);
-        for (SkillVersion pending : pendingVersions) {
-            reviewTaskRepository.findBySkillVersionIdAndStatus(pending.getId(), ReviewTaskStatus.PENDING)
-                    .ifPresent(reviewTaskRepository::delete);
-            pending.setStatus(SkillVersionStatus.DRAFT);
-            skillVersionRepository.save(pending);
-        }
+        // 6c. Preserve earlier review submissions as revision history.
+        supersedePendingReviewVersions(skill);
 
         // 7. Check version doesn't already exist
         java.util.Optional<SkillVersion> existingVersion = skillVersionRepository.findBySkillIdAndVersion(skill.getId(), metadata.version());
@@ -276,7 +271,7 @@ public class SkillPublishService {
         // 8. Create SkillVersion
         SkillVersion version = new SkillVersion(skill.getId(), metadata.version(), publisherId);
         version.setRequestedVisibility(visibility);
-        boolean autoPublish = forceAutoPublish || isSuperAdmin;
+        boolean autoPublish = forceAutoPublish || isSuperAdmin || visibility == SkillVisibility.PRIVATE;
         if (autoPublish) {
             version.setStatus(SkillVersionStatus.PUBLISHED);
             version.setPublishedAt(currentTime());
@@ -413,6 +408,31 @@ public class SkillPublishService {
         if (version.getId().equals(skill.getLatestVersionId())) {
             skill.setLatestVersionId(null);
         }
+    }
+
+    private void supersedePendingReviewVersions(Skill skill) {
+        List<SkillVersion> existingVersions = skillVersionRepository.findBySkillId(skill.getId());
+        for (SkillVersion existingVersion : existingVersions) {
+            if (existingVersion.getStatus() == SkillVersionStatus.PUBLISHED) {
+                continue;
+            }
+            reviewTaskRepository.findBySkillVersionIdAndStatus(existingVersion.getId(), ReviewTaskStatus.PENDING)
+                    .ifPresent(task -> supersedePendingReviewVersion(existingVersion, task));
+        }
+    }
+
+    private void supersedePendingReviewVersion(SkillVersion version, ReviewTask task) {
+        if (!Objects.equals(task.getStatus(), ReviewTaskStatus.PENDING)) {
+            return;
+        }
+
+        task.setStatus(ReviewTaskStatus.SUPERSEDED);
+        task.setReviewComment(SUPERSEDED_REVIEW_COMMENT);
+        task.setReviewedAt(currentTime());
+        reviewTaskRepository.save(task);
+
+        version.setStatus(SkillVersionStatus.SUPERSEDED);
+        skillVersionRepository.save(version);
     }
 
     private String resolveNamespaceSlug(Long namespaceId) {

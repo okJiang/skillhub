@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, Folder } from 'lucide-react'
+import type { SkillFile, SkillVersion } from '@/api/types'
 import { formatLocalDateTime } from '@/shared/lib/date-time'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Textarea } from '@/shared/ui/textarea'
 import { Label } from '@/shared/ui/label'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -12,13 +14,86 @@ import { toast } from '@/shared/lib/toast'
 import { cn } from '@/shared/lib/utils'
 import { resolveReviewActionErrorDescription } from '@/features/review/review-error'
 import { ReviewSkillDetailSection } from '@/features/review/review-skill-detail-section'
+import { ReviewFileCommentsDialog } from '@/features/review/review-file-comments-dialog'
+import { ReviewTestRunsSection } from '@/features/review/review-test-runs-section'
 import { SecurityAuditSection } from '@/features/security-audit/security-audit-section'
 import { FileTree } from '@/features/skill/file-tree'
-import { FilePreviewDialog } from '@/features/skill/file-preview-dialog'
 import type { FileTreeNode } from '@/features/skill/file-tree-builder'
 import { useReviewFile } from '@/features/review/use-review-file'
 import { buildApiUrl, WEB_API_PREFIX } from '@/api/client'
-import { useReviewDetail, useReviewSkillDetail, useApproveReview, useRejectReview } from '@/features/review/use-review-detail'
+import {
+  useReviewDetail,
+  useReviewSkillDetail,
+  useApproveReview,
+  useRejectReview,
+  useReviewVersionSnapshot,
+} from '@/features/review/use-review-detail'
+
+function parseMetadataJson(parsed?: string) {
+  if (!parsed) {
+    return {}
+  }
+  try {
+    const value = JSON.parse(parsed)
+    return typeof value === 'object' && value !== null ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function buildMetadataDiffEntries(source?: string, target?: string) {
+  const sourceMetadata = parseMetadataJson(source)
+  const targetMetadata = parseMetadataJson(target)
+  const keys = Array.from(new Set([...Object.keys(sourceMetadata), ...Object.keys(targetMetadata)])).sort()
+  return keys
+    .filter((key) => JSON.stringify(sourceMetadata[key]) !== JSON.stringify(targetMetadata[key]))
+    .map((key) => ({
+      key,
+      source: sourceMetadata[key],
+      target: targetMetadata[key],
+    }))
+}
+
+function buildFileDiffSummary(sourceFiles?: SkillFile[], targetFiles?: SkillFile[]) {
+  const sourceMap = new Map((sourceFiles ?? []).map((file) => [file.filePath, file.sha256]))
+  const targetMap = new Map((targetFiles ?? []).map((file) => [file.filePath, file.sha256]))
+  const added: string[] = []
+  const removed: string[] = []
+  const changed: string[] = []
+
+  for (const [path, hash] of sourceMap.entries()) {
+    if (!targetMap.has(path)) {
+      removed.push(path)
+    } else if (targetMap.get(path) !== hash) {
+      changed.push(path)
+    }
+  }
+  for (const path of targetMap.keys()) {
+    if (!sourceMap.has(path)) {
+      added.push(path)
+    }
+  }
+
+  return { added, removed, changed }
+}
+
+function sortRevisionsForReview(versions: SkillVersion[], activeVersion?: string) {
+  const weight = (status: string) => {
+    if (status === 'PENDING_REVIEW' || status === 'SCANNING' || status === 'SCAN_FAILED') return 0
+    if (status === 'REJECTED' || status === 'SUPERSEDED') return 1
+    if (status === 'PUBLISHED') return 2
+    if (status === 'DRAFT') return 3
+    return 4
+  }
+
+  return [...versions].sort((left, right) => {
+    if (left.version === activeVersion) return -1
+    if (right.version === activeVersion) return 1
+    const statusDelta = weight(left.status) - weight(right.status)
+    if (statusDelta !== 0) return statusDelta
+    return right.id - left.id
+  })
+}
 
 /**
  * Review task detail page for moderators. The route owns the approve/reject
@@ -60,10 +135,21 @@ export function ReviewDetailPage() {
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [approveDialog, setApproveDialog] = useState(false)
   const [rejectDialog, setRejectDialog] = useState(false)
+  const [compareSourceVersionId, setCompareSourceVersionId] = useState<number | null>(null)
+  const [compareTargetVersionId, setCompareTargetVersionId] = useState<number | null>(null)
   // File browser sidebar state
   const [fileBrowserOpen, setFileBrowserOpen] = useState(true)
   const [previewNode, setPreviewNode] = useState<FileTreeNode | null>(null)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
+
+  const {
+    data: compareSourceSnapshot,
+    isLoading: isLoadingCompareSource,
+  } = useReviewVersionSnapshot(taskId, compareSourceVersionId, !!compareSourceVersionId)
+  const {
+    data: compareTargetSnapshot,
+    isLoading: isLoadingCompareTarget,
+  } = useReviewVersionSnapshot(taskId, compareTargetVersionId, !!compareTargetVersionId)
 
   // File content for preview — uses the review-bound version via review file API
   const { data: previewContent, isLoading: isLoadingPreview, error: previewError } = useReviewFile(
@@ -126,6 +212,36 @@ export function ReviewDetailPage() {
     (version) => version.version === reviewSkillDetail.activeVersion
   )
   const isApprovalBlockedByScanning = activeReviewVersion?.status === 'SCANNING'
+  const revisionHistory = useMemo(
+    () => sortRevisionsForReview(reviewSkillDetail?.versions ?? [], reviewSkillDetail?.activeVersion),
+    [reviewSkillDetail?.activeVersion, reviewSkillDetail?.versions]
+  )
+  const metadataDiffEntries = buildMetadataDiffEntries(
+    compareSourceSnapshot?.parsedMetadataJson,
+    compareTargetSnapshot?.parsedMetadataJson
+  )
+  const fileDiffSummary = buildFileDiffSummary(compareSourceSnapshot?.files, compareTargetSnapshot?.files)
+  const isCompareLoading = isLoadingCompareSource || isLoadingCompareTarget
+  const isReadmeChanged = compareSourceSnapshot?.documentationContent !== compareTargetSnapshot?.documentationContent
+  const resolveRevisionStatusLabel = (status: string) => {
+    if (status === 'DRAFT') return t('skillDetail.versionStatusDraft')
+    if (status === 'SCANNING') return t('skillDetail.versionStatusScanning')
+    if (status === 'SCAN_FAILED') return t('skillDetail.versionStatusScanFailed')
+    if (status === 'PENDING_REVIEW') return t('skillDetail.versionStatusPendingReview')
+    if (status === 'PUBLISHED') return t('skillDetail.versionStatusPublished')
+    if (status === 'REJECTED') return t('skillDetail.versionStatusRejected')
+    if (status === 'SUPERSEDED') return t('skillDetail.versionStatusSuperseded')
+    if (status === 'YANKED') return t('skillDetail.versionStatusYanked')
+    return status
+  }
+
+  const handleOpenRevisionDiff = (sourceVersionId: number) => {
+    if (!activeReviewVersion) {
+      return
+    }
+    setCompareSourceVersionId(sourceVersionId)
+    setCompareTargetVersionId(activeReviewVersion.id)
+  }
 
   return (
     <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 animate-fade-up">
@@ -166,6 +282,9 @@ export function ReviewDetailPage() {
               )}
               {review.status === 'REJECTED' && (
                 <span className="px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-400 text-sm">{t('review.statusRejected')}</span>
+              )}
+              {review.status === 'SUPERSEDED' && (
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-500/10 text-slate-300 text-sm">{t('review.statusSuperseded')}</span>
               )}
             </p>
           </div>
@@ -282,6 +401,60 @@ export function ReviewDetailPage() {
         ) : null
       })()}
 
+      <Card className="p-8 space-y-6">
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold font-heading">{t('review.revisionHistoryTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('review.revisionHistoryDescription')}</p>
+        </div>
+
+        {revisionHistory.length > 0 ? (
+          <div className="space-y-3">
+            {revisionHistory.map((version) => {
+              const isActiveRevision = version.version === reviewSkillDetail?.activeVersion
+              return (
+                <div
+                  key={version.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold font-mono">{version.version}</span>
+                      <span className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-foreground">
+                        {resolveRevisionStatusLabel(version.status)}
+                      </span>
+                      {isActiveRevision ? (
+                        <span className="inline-flex items-center rounded-full bg-brand-gradient px-2.5 py-0.5 text-xs font-medium text-white">
+                          {t('review.currentRevision')}
+                        </span>
+                      ) : null}
+                    </div>
+                    {version.changelog ? (
+                      <p className="text-sm text-muted-foreground">{version.changelog}</p>
+                    ) : null}
+                    <div className="text-sm text-muted-foreground">{t('skillDetail.fileCount', { count: version.fileCount })}</div>
+                  </div>
+
+                  {!isActiveRevision && activeReviewVersion ? (
+                    <Button variant="outline" onClick={() => handleOpenRevisionDiff(version.id)}>
+                      {t('review.compareWithCurrent')}
+                    </Button>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('skillDetail.noVersions')}</p>
+        )}
+      </Card>
+
+      <ReviewTestRunsSection
+        taskId={taskId}
+        versions={revisionHistory}
+        activeVersion={reviewSkillDetail?.activeVersion}
+        canCreate={review.status === 'PENDING'}
+      />
+
       <ReviewSkillDetailSection
         detail={reviewSkillDetail}
         isLoading={isLoadingReviewSkillDetail}
@@ -307,6 +480,129 @@ export function ReviewDetailPage() {
         variant="destructive"
         onConfirm={handleReject}
       />
+
+      <Dialog
+        open={!!compareSourceVersionId && !!compareTargetVersionId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCompareSourceVersionId(null)
+            setCompareTargetVersionId(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('skillDetail.compareDialogTitle')}</DialogTitle>
+            <DialogDescription>
+              {compareSourceSnapshot && compareTargetSnapshot
+                ? t('skillDetail.compareDialogDescription', {
+                    source: compareSourceSnapshot.version,
+                    target: compareTargetSnapshot.version,
+                  })
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isCompareLoading ? (
+            <div className="space-y-3">
+              <div className="h-10 animate-shimmer rounded-lg" />
+              <div className="h-24 animate-shimmer rounded-xl" />
+              <div className="h-24 animate-shimmer rounded-xl" />
+            </div>
+          ) : compareSourceSnapshot && compareTargetSnapshot ? (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="rounded-lg border border-border/60 p-3">
+                  <div className="text-muted-foreground">{t('skillDetail.compareSourceLabel')}</div>
+                  <div className="mt-1 font-mono text-foreground">v{compareSourceSnapshot.version}</div>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3">
+                  <div className="text-muted-foreground">{t('skillDetail.compareTargetLabel')}</div>
+                  <div className="mt-1 font-mono text-foreground">v{compareTargetSnapshot.version}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-semibold text-foreground">{t('skillDetail.metadataChanges')}</div>
+                {metadataDiffEntries.length > 0 ? (
+                  <div className="space-y-2">
+                    {metadataDiffEntries.map((entry) => (
+                      <div key={entry.key} className="rounded-lg border border-border/60 p-3 text-sm">
+                        <div className="font-medium text-foreground">{entry.key}</div>
+                        <div className="mt-1 text-muted-foreground">
+                          {String(entry.source ?? '—')} → {String(entry.target ?? '—')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">{t('skillDetail.noMetadataChanges')}</div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-semibold text-foreground">{t('skillDetail.readmeChange')}</div>
+                <div className="text-sm text-muted-foreground">
+                  {isReadmeChanged ? t('skillDetail.readmeChanged') : t('skillDetail.readmeUnchanged')}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-foreground">{t('skillDetail.fileChanges')}</div>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <div className="text-muted-foreground">{t('skillDetail.filesAdded')}</div>
+                    <div className="mt-1 font-semibold text-foreground">{fileDiffSummary.added.length}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <div className="text-muted-foreground">{t('skillDetail.filesRemoved')}</div>
+                    <div className="mt-1 font-semibold text-foreground">{fileDiffSummary.removed.length}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <div className="text-muted-foreground">{t('skillDetail.filesChanged')}</div>
+                    <div className="mt-1 font-semibold text-foreground">{fileDiffSummary.changed.length}</div>
+                  </div>
+                </div>
+
+                {([['added', fileDiffSummary.added], ['removed', fileDiffSummary.removed], ['changed', fileDiffSummary.changed]] as const)
+                  .filter(([, files]) => files.length > 0)
+                  .map(([kind, files]) => (
+                    <div key={kind} className="rounded-lg border border-border/60 p-3 text-sm">
+                      <div className="font-medium text-foreground">
+                        {kind === 'added'
+                          ? t('skillDetail.filesAdded')
+                          : kind === 'removed'
+                            ? t('skillDetail.filesRemoved')
+                            : t('skillDetail.filesChanged')}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {files.map((file) => (
+                          <span key={file} className="rounded-full bg-secondary px-3 py-1 font-mono text-xs text-secondary-foreground">
+                            {file}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">{t('review.revisionDiffUnavailable')}</div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCompareSourceVersionId(null)
+                setCompareTargetVersionId(null)
+              }}
+            >
+              {t('dialog.close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
 
       {/* Sidebar — file browser for the review-bound active version */}
@@ -333,6 +629,7 @@ export function ReviewDetailPage() {
                 <ChevronDown className="h-4 w-4" />
               </span>
             </button>
+            <p className="text-xs text-muted-foreground">{t('review.openLineCommentsHint')}</p>
             {fileBrowserOpen && (
               <div className="max-h-[400px] overflow-y-auto -mx-5 px-5">
                 <FileTree files={reviewFiles} onFileClick={handleFileClick} bare />
@@ -351,7 +648,7 @@ export function ReviewDetailPage() {
       </aside>
 
       {/* File preview dialog */}
-      <FilePreviewDialog
+      <ReviewFileCommentsDialog
         open={previewDialogOpen}
         onOpenChange={setPreviewDialogOpen}
         node={previewNode}
@@ -359,6 +656,9 @@ export function ReviewDetailPage() {
         isLoading={isLoadingPreview}
         error={previewError}
         onDownload={handleDownloadFile}
+        taskId={taskId}
+        versionId={activeReviewVersion?.id ?? review.skillVersionId}
+        canComment={review.status === 'PENDING'}
       />
     </div>
   )

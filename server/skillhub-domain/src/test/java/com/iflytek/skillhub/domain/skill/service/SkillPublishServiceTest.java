@@ -102,7 +102,7 @@ class SkillPublishServiceTest {
                 CLOCK
         );
         lenient().when(securityScanService.isEnabled()).thenReturn(false);
-        lenient().when(skillVersionRepository.findBySkillIdAndStatus(anyLong(), eq(SkillVersionStatus.PENDING_REVIEW)))
+        lenient().when(skillVersionRepository.findBySkillId(anyLong()))
                 .thenReturn(List.of());
         lenient().when(reviewTaskRepository.save(any(ReviewTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
@@ -177,6 +177,57 @@ class SkillPublishServiceTest {
     }
 
     @Test
+    void testPublishFromEntries_PrivateSkillPublishesDirectlyWithoutReviewTask() throws Exception {
+        String namespaceSlug = "test-ns";
+        String publisherId = "user-100";
+        String skillMdContent = "---\nname: private-skill\ndescription: Test\nversion: 1.0.0\n---\nBody";
+
+        PackageEntry skillMd = new PackageEntry("SKILL.md", skillMdContent.getBytes(), skillMdContent.length(), "text/markdown");
+        PackageEntry file1 = new PackageEntry("file1.txt", "content".getBytes(), 7, "text/plain");
+        List<PackageEntry> entries = List.of(skillMd, file1);
+
+        Namespace namespace = new Namespace(namespaceSlug, "Test NS", "user-1");
+        setId(namespace, 1L);
+        NamespaceMember member = mock(NamespaceMember.class);
+        SkillMetadata metadata = new SkillMetadata("private-skill", "Test", "1.0.0", "Body", Map.of());
+
+        Skill skill = new Skill(1L, "private-skill", publisherId, SkillVisibility.PRIVATE);
+        setId(skill, 1L);
+        when(namespaceRepository.findBySlug(namespaceSlug)).thenReturn(Optional.of(namespace));
+        when(namespaceMemberRepository.findByNamespaceIdAndUserId(any(), eq(publisherId))).thenReturn(Optional.of(member));
+        when(skillPackageValidator.validate(entries)).thenReturn(ValidationResult.pass());
+        when(skillMetadataParser.parse(skillMdContent)).thenReturn(metadata);
+        when(prePublishValidator.validate(any())).thenReturn(ValidationResult.pass());
+        when(skillRepository.findByNamespaceIdAndSlug(any(), eq("private-skill"))).thenReturn(List.of(skill));
+        when(skillRepository.findByNamespaceIdAndSlugAndOwnerId(any(), eq("private-skill"), eq(publisherId))).thenReturn(Optional.of(skill));
+        when(skillVersionRepository.findBySkillIdAndVersion(any(), eq("1.0.0"))).thenReturn(Optional.empty());
+        when(skillVersionRepository.save(any(SkillVersion.class))).thenAnswer(invocation -> {
+            SkillVersion saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                setId(saved, 10L);
+            }
+            return saved;
+        });
+        when(skillRepository.save(any())).thenReturn(skill);
+
+        SkillPublishService.PublishResult result = service.publishFromEntries(
+                namespaceSlug,
+                entries,
+                publisherId,
+                SkillVisibility.PRIVATE,
+                Set.of()
+        );
+
+        assertNotNull(result);
+        assertEquals(SkillVersionStatus.PUBLISHED, result.version().getStatus());
+        assertEquals(10L, skill.getLatestVersionId());
+        assertEquals(SkillVisibility.PRIVATE, skill.getVisibility());
+        verify(reviewTaskRepository, never()).save(any(ReviewTask.class));
+        verify(eventPublisher, never()).publishEvent(isA(ReviewSubmittedEvent.class));
+        verify(eventPublisher).publishEvent(isA(SkillPublishedEvent.class));
+    }
+
+    @Test
     void testPublishFromEntries_ShouldReplaceDraftVersionWithSameVersion() throws Exception {
         String namespaceSlug = "test-ns";
         String publisherId = "user-100";
@@ -204,7 +255,7 @@ class SkillPublishServiceTest {
         when(prePublishValidator.validate(any())).thenReturn(ValidationResult.pass());
         when(skillRepository.findByNamespaceIdAndSlug(any(), eq("test-skill"))).thenReturn(List.of(skill));
         when(skillRepository.findByNamespaceIdAndSlugAndOwnerId(any(), eq("test-skill"), eq(publisherId))).thenReturn(Optional.of(skill));
-        when(skillVersionRepository.findBySkillIdAndStatus(1L, SkillVersionStatus.PENDING_REVIEW)).thenReturn(List.of());
+        when(skillVersionRepository.findBySkillId(1L)).thenReturn(List.of());
         when(skillVersionRepository.findBySkillIdAndVersion(1L, "1.0.0")).thenReturn(Optional.of(draftVersion));
         when(skillFileRepository.findByVersionId(8L)).thenReturn(List.of(oldFile));
         when(skillVersionRepository.save(any(SkillVersion.class))).thenAnswer(invocation -> {
@@ -260,7 +311,7 @@ class SkillPublishServiceTest {
         when(prePublishValidator.validate(any())).thenReturn(ValidationResult.pass());
         when(skillRepository.findByNamespaceIdAndSlug(any(), eq("test-skill"))).thenReturn(List.of(skill));
         when(skillRepository.findByNamespaceIdAndSlugAndOwnerId(any(), eq("test-skill"), eq(publisherId))).thenReturn(Optional.of(skill));
-        when(skillVersionRepository.findBySkillIdAndStatus(1L, SkillVersionStatus.PENDING_REVIEW)).thenReturn(List.of());
+        when(skillVersionRepository.findBySkillId(1L)).thenReturn(List.of());
         when(skillVersionRepository.findBySkillIdAndVersion(1L, "1.0.0")).thenReturn(Optional.of(draftVersion));
         when(skillFileRepository.findByVersionId(8L)).thenReturn(List.of(oldFile));
         when(skillVersionRepository.save(any(SkillVersion.class))).thenAnswer(invocation -> {
@@ -320,7 +371,7 @@ class SkillPublishServiceTest {
         when(prePublishValidator.validate(any())).thenReturn(ValidationResult.pass());
         when(skillRepository.findByNamespaceIdAndSlug(any(), eq("test-skill"))).thenReturn(List.of(skill));
         when(skillRepository.findByNamespaceIdAndSlugAndOwnerId(any(), eq("test-skill"), eq(publisherId))).thenReturn(Optional.of(skill));
-        when(skillVersionRepository.findBySkillIdAndStatus(1L, SkillVersionStatus.PENDING_REVIEW)).thenReturn(List.of());
+        when(skillVersionRepository.findBySkillId(1L)).thenReturn(List.of());
         when(skillVersionRepository.findBySkillIdAndVersion(1L, "1.0.0")).thenReturn(Optional.of(draftVersion));
         when(skillFileRepository.findByVersionId(8L)).thenReturn(List.of(oldFile));
         when(skillVersionRepository.save(any(SkillVersion.class))).thenAnswer(invocation -> {
@@ -892,7 +943,7 @@ class SkillPublishServiceTest {
     }
 
     @Test
-    void testPublishFromEntries_ShouldAutoWithdrawPendingVersions() throws Exception {
+    void testPublishFromEntries_ShouldPreservePreviousPendingVersionsAsSupersededHistory() throws Exception {
         String namespaceSlug = "test-ns";
         String publisherId = "user-100";
         String skillMdContent = "---\nname: test-skill\ndescription: Test\nversion: 2.0.0\n---\nBody";
@@ -921,7 +972,7 @@ class SkillPublishServiceTest {
         when(prePublishValidator.validate(any())).thenReturn(ValidationResult.pass());
         when(skillRepository.findByNamespaceIdAndSlug(any(), eq("test-skill"))).thenReturn(List.of(skill));
         when(skillRepository.findByNamespaceIdAndSlugAndOwnerId(any(), eq("test-skill"), eq(publisherId))).thenReturn(Optional.of(skill));
-        when(skillVersionRepository.findBySkillIdAndStatus(1L, SkillVersionStatus.PENDING_REVIEW)).thenReturn(List.of(pendingV1));
+        when(skillVersionRepository.findBySkillId(1L)).thenReturn(List.of(pendingV1));
         when(reviewTaskRepository.findBySkillVersionIdAndStatus(5L, com.iflytek.skillhub.domain.review.ReviewTaskStatus.PENDING))
                 .thenReturn(Optional.of(pendingTask));
         when(skillVersionRepository.findBySkillIdAndVersion(any(), eq("2.0.0"))).thenReturn(Optional.empty());
@@ -934,9 +985,10 @@ class SkillPublishServiceTest {
 
         service.publishFromEntries(namespaceSlug, entries, publisherId, SkillVisibility.PUBLIC, Set.of());
 
-        // Verify pending version was withdrawn to DRAFT
-        assertEquals(SkillVersionStatus.DRAFT, pendingV1.getStatus());
-        verify(reviewTaskRepository).delete(pendingTask);
+        assertEquals(SkillVersionStatus.SUPERSEDED, pendingV1.getStatus());
+        assertEquals(com.iflytek.skillhub.domain.review.ReviewTaskStatus.SUPERSEDED, pendingTask.getStatus());
+        assertEquals("Superseded by a newer review submission.", pendingTask.getReviewComment());
+        verify(reviewTaskRepository).save(pendingTask);
         verify(skillVersionRepository).save(pendingV1);
     }
 
@@ -994,6 +1046,7 @@ class SkillPublishServiceTest {
     void testSkillVersionStatus_ShouldSupportScanningLifecycleStates() {
         assertEquals(SkillVersionStatus.SCANNING, SkillVersionStatus.valueOf("SCANNING"));
         assertEquals(SkillVersionStatus.SCAN_FAILED, SkillVersionStatus.valueOf("SCAN_FAILED"));
+        assertEquals(SkillVersionStatus.SUPERSEDED, SkillVersionStatus.valueOf("SUPERSEDED"));
     }
 
     @Test

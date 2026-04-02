@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.domain.audit.AuditLogService;
 import com.iflytek.skillhub.domain.report.SkillReportRepository;
 import com.iflytek.skillhub.domain.review.PromotionRequestRepository;
+import com.iflytek.skillhub.domain.review.ReviewTestRunRepository;
 import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
 import com.iflytek.skillhub.domain.security.SecurityScanService;
 import com.iflytek.skillhub.domain.skill.Skill;
@@ -51,6 +52,8 @@ class SkillHardDeleteServiceTest {
     @Mock
     private ReviewTaskRepository reviewTaskRepository;
     @Mock
+    private ReviewTestRunRepository reviewTestRunRepository;
+    @Mock
     private PromotionRequestRepository promotionRequestRepository;
     @Mock
     private SkillStarRepository skillStarRepository;
@@ -86,6 +89,7 @@ class SkillHardDeleteServiceTest {
                 skillFileRepository,
                 skillTagRepository,
                 reviewTaskRepository,
+                reviewTestRunRepository,
                 promotionRequestRepository,
                 skillStarRepository,
                 skillRatingRepository,
@@ -125,6 +129,7 @@ class SkillHardDeleteServiceTest {
         inOrder.verify(skillRepository).flush();
         inOrder.verify(skillVersionRepository).deleteBySkillId(7L);
         verify(reviewTaskRepository).deleteBySkillVersionIdIn(List.of(21L, 22L));
+        verify(reviewTestRunRepository).deleteBySkillVersionIdIn(List.of(21L, 22L));
         verify(promotionRequestRepository).deleteBySourceSkillIdOrTargetSkillId(7L, 7L);
         verify(skillTagRepository).deleteBySkillId(7L);
         verify(skillStarRepository).deleteBySkillId(7L);

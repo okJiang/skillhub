@@ -3,15 +3,23 @@ package com.iflytek.skillhub.service;
 import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.skill.service.SkillDownloadService;
 import com.iflytek.skillhub.dto.AdminSkillActionRequest;
+import com.iflytek.skillhub.dto.CreateReviewCommentRequest;
+import com.iflytek.skillhub.dto.CreateReviewCommentThreadRequest;
+import com.iflytek.skillhub.dto.CreateReviewTestRunRequest;
 import com.iflytek.skillhub.dto.NamespaceLifecycleRequest;
 import com.iflytek.skillhub.dto.NamespaceResponse;
 import com.iflytek.skillhub.dto.PageResponse;
 import com.iflytek.skillhub.dto.PromotionResponseDto;
+import com.iflytek.skillhub.dto.ReviewCommentResponse;
+import com.iflytek.skillhub.dto.ReviewCommentThreadResponse;
 import com.iflytek.skillhub.dto.ReviewSkillDetailResponse;
+import com.iflytek.skillhub.dto.ReviewTestRunResponse;
 import com.iflytek.skillhub.dto.ReviewTaskResponse;
+import com.iflytek.skillhub.dto.ReviewVersionSnapshotResponse;
 import com.iflytek.skillhub.dto.SkillLifecycleMutationResponse;
 import com.iflytek.skillhub.dto.SkillVersionRereleaseRequest;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
@@ -104,6 +112,86 @@ public class GovernanceWorkflowAppService {
                                                           Map<Long, NamespaceRole> userNsRoles) {
         return reviewSkillDetailAppService.getReviewSkillDetail(
                 reviewTaskId,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public ReviewVersionSnapshotResponse getReviewVersionSnapshot(Long reviewTaskId,
+                                                                  Long versionId,
+                                                                  String userId,
+                                                                  Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.getReviewVersionSnapshot(
+                reviewTaskId,
+                versionId,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public List<ReviewTestRunResponse> listReviewTestRuns(Long reviewTaskId,
+                                                          Long versionId,
+                                                          String userId,
+                                                          Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.listReviewTestRuns(
+                reviewTaskId,
+                versionId,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public ReviewTestRunResponse createReviewTestRun(Long reviewTaskId,
+                                                     Long versionId,
+                                                     CreateReviewTestRunRequest request,
+                                                     String userId,
+                                                     Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.createReviewTestRun(
+                reviewTaskId,
+                versionId,
+                request,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public List<ReviewCommentThreadResponse> listReviewCommentThreads(Long reviewTaskId,
+                                                                      Long versionId,
+                                                                      String filePath,
+                                                                      String userId,
+                                                                      Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.listReviewCommentThreads(
+                reviewTaskId,
+                versionId,
+                filePath,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public ReviewCommentThreadResponse createReviewCommentThread(Long reviewTaskId,
+                                                                 Long versionId,
+                                                                 CreateReviewCommentThreadRequest request,
+                                                                 String userId,
+                                                                 Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.createReviewCommentThread(
+                reviewTaskId,
+                versionId,
+                request,
+                userId,
+                userNsRoles != null ? userNsRoles : Map.of()
+        );
+    }
+
+    public ReviewCommentResponse createReviewComment(Long reviewTaskId,
+                                                     Long threadId,
+                                                     CreateReviewCommentRequest request,
+                                                     String userId,
+                                                     Map<Long, NamespaceRole> userNsRoles) {
+        return reviewSkillDetailAppService.createReviewComment(
+                reviewTaskId,
+                threadId,
+                request,
                 userId,
                 userNsRoles != null ? userNsRoles : Map.of()
         );

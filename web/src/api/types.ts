@@ -296,7 +296,7 @@ export interface ReviewTask {
   namespace: string
   skillSlug: string
   version: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUPERSEDED'
   submittedBy: string
   submittedByName?: string
   reviewedBy?: string
@@ -314,6 +314,70 @@ export interface ReviewSkillDetail {
   documentationContent?: string
   downloadUrl: string
   activeVersion: string
+}
+
+export interface ReviewVersionSnapshot {
+  versionId: number
+  version: string
+  status: string
+  parsedMetadataJson?: string
+  files: SkillFile[]
+  documentationPath?: string
+  documentationContent?: string
+}
+
+export interface ReviewComment {
+  id: number
+  threadId: number
+  body: string
+  createdBy: string
+  createdAt: string
+}
+
+export interface ReviewCommentThread {
+  id: number
+  reviewTaskId: number
+  skillVersionId: number
+  filePath: string
+  lineNumber: number
+  createdBy: string
+  createdAt: string
+  comments: ReviewComment[]
+}
+
+export interface CreateReviewCommentThreadInput {
+  filePath: string
+  lineNumber: number
+  body: string
+}
+
+export interface CreateReviewCommentInput {
+  body: string
+}
+
+export type ReviewTestRunSource = 'MANUAL' | 'CI' | 'SCANNER' | 'CUSTOM'
+export type ReviewTestRunStatus = 'PASSED' | 'FAILED' | 'WARNING' | 'INFO'
+
+export interface ReviewTestRun {
+  id: number
+  skillVersionId: number
+  source: ReviewTestRunSource | string
+  status: ReviewTestRunStatus | string
+  name: string
+  summary?: string
+  detailsMarkdown?: string
+  externalUrl?: string
+  createdBy: string
+  createdAt: string
+}
+
+export interface CreateReviewTestRunInput {
+  source: ReviewTestRunSource
+  status: ReviewTestRunStatus
+  name: string
+  summary?: string
+  detailsMarkdown?: string
+  externalUrl?: string
 }
 
 export interface PromotionTask {

@@ -14,8 +14,11 @@ import com.iflytek.skillhub.domain.review.ReviewTask;
 import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
 import com.iflytek.skillhub.domain.review.ReviewTaskStatus;
 import com.iflytek.skillhub.domain.skill.service.SkillDownloadService;
+import com.iflytek.skillhub.dto.ReviewCommentResponse;
+import com.iflytek.skillhub.dto.ReviewCommentThreadResponse;
 import com.iflytek.skillhub.dto.ReviewTaskResponse;
 import com.iflytek.skillhub.dto.ReviewSkillDetailResponse;
+import com.iflytek.skillhub.dto.ReviewTestRunResponse;
 import com.iflytek.skillhub.dto.SkillDetailResponse;
 import com.iflytek.skillhub.dto.SkillFileResponse;
 import com.iflytek.skillhub.dto.SkillLifecycleVersionResponse;
@@ -42,6 +45,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -109,24 +115,28 @@ class ReviewPortalControllerTest {
     }
 
     @Test
-    void listPendingReviews_forbidsNamespaceMember() throws Exception {
+    void listPendingReviews_allowsNamespaceMember() throws Exception {
         Namespace namespace = createNamespace(20L, "team-a");
         stubNamespaceRoles("user-1", List.of(new NamespaceMember(20L, "user-1", NamespaceRole.MEMBER)));
         given(namespaceRepository.findById(20L)).willReturn(Optional.of(namespace));
         given(rbacService.getUserRoleCodes("user-1")).willReturn(Set.of());
-        given(permissionChecker.canManageNamespaceReviews(
-                20L,
-                namespace.getType(),
-                Map.of(20L, NamespaceRole.MEMBER),
-                Set.of())).willReturn(false);
+        given(reviewService.canReviewNamespace(
+                any(ReviewTask.class),
+                eq("user-1"),
+                eq(namespace.getType()),
+                eq(Map.of(20L, NamespaceRole.MEMBER)),
+                eq(Set.of()))).willReturn(true);
+        var task = createReviewTask(1L, 20L, "user-2");
+        given(reviewTaskRepository.findByNamespaceIdAndStatus(eq(20L), eq(ReviewTaskStatus.PENDING), any()))
+                .willReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 20), 1));
+        stubReviewResponse(task);
 
         mockMvc.perform(get("/api/v1/reviews/pending")
                         .param("namespaceId", "20")
                         .with(auth("user-1")))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
-
-        verify(reviewTaskRepository, never()).findByNamespaceIdAndStatus(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.items[0].id").value(1L));
     }
 
     @Test
@@ -219,6 +229,192 @@ class ReviewPortalControllerTest {
     }
 
     @Test
+    void listReviewCommentThreads_returnsLineScopedComments() throws Exception {
+        stubNamespaceRoles("admin", List.of());
+        given(reviewSkillDetailAppService.listReviewCommentThreads(1L, 100L, "README.md", "admin", Map.of()))
+                .willReturn(List.of(new ReviewCommentThreadResponse(
+                        9L,
+                        1L,
+                        100L,
+                        "README.md",
+                        12,
+                        "admin",
+                        java.time.Instant.parse("2026-04-02T09:30:00Z"),
+                        List.of(
+                                new ReviewCommentResponse(
+                                        10L,
+                                        9L,
+                                        "Please add prerequisites.",
+                                        "admin",
+                                        java.time.Instant.parse("2026-04-02T09:31:00Z")
+                                )
+                        )
+                )));
+
+        mockMvc.perform(get("/api/v1/reviews/1/versions/100/comments")
+                        .param("filePath", "README.md")
+                        .with(auth("admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data[0].lineNumber").value(12))
+                .andExpect(jsonPath("$.data[0].comments[0].body").value("Please add prerequisites."));
+    }
+
+    @Test
+    void createReviewCommentThread_passesRequestBodyToService() throws Exception {
+        stubNamespaceRoles("admin", List.of());
+        given(reviewSkillDetailAppService.createReviewCommentThread(
+                1L,
+                100L,
+                new com.iflytek.skillhub.dto.CreateReviewCommentThreadRequest(
+                        "README.md",
+                        12,
+                        "Please add prerequisites."
+                ),
+                "admin",
+                Map.of()
+        )).willReturn(new ReviewCommentThreadResponse(
+                9L,
+                1L,
+                100L,
+                "README.md",
+                12,
+                "admin",
+                java.time.Instant.parse("2026-04-02T09:30:00Z"),
+                List.of(
+                        new ReviewCommentResponse(
+                                10L,
+                                9L,
+                                "Please add prerequisites.",
+                                "admin",
+                                java.time.Instant.parse("2026-04-02T09:31:00Z")
+                        )
+                )
+        ));
+
+        mockMvc.perform(post("/api/v1/reviews/1/versions/100/comments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "filePath":"README.md",
+                                  "lineNumber":12,
+                                  "body":"Please add prerequisites."
+                                }
+                                """)
+                        .with(csrf())
+                        .with(auth("admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(9L))
+                .andExpect(jsonPath("$.data.comments[0].body").value("Please add prerequisites."));
+    }
+
+    @Test
+    void createReviewComment_passesRequestBodyToService() throws Exception {
+        stubNamespaceRoles("admin", List.of());
+        given(reviewSkillDetailAppService.createReviewComment(
+                1L,
+                9L,
+                new com.iflytek.skillhub.dto.CreateReviewCommentRequest("Updated."),
+                "admin",
+                Map.of()
+        )).willReturn(new ReviewCommentResponse(
+                11L,
+                9L,
+                "Updated.",
+                "admin",
+                java.time.Instant.parse("2026-04-02T09:32:00Z")
+        ));
+
+        mockMvc.perform(post("/api/v1/reviews/1/comment-threads/9/comments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "body":"Updated."
+                                }
+                                """)
+                        .with(csrf())
+                        .with(auth("admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(11L))
+                .andExpect(jsonPath("$.data.threadId").value(9L));
+    }
+
+    @Test
+    void getReviewTestRuns_returnsRevisionArtifacts() throws Exception {
+        stubNamespaceRoles("admin", List.of());
+        given(reviewSkillDetailAppService.listReviewTestRuns(1L, 100L, "admin", Map.of()))
+                .willReturn(List.of(new ReviewTestRunResponse(
+                        7L,
+                        100L,
+                        "CI",
+                        "PASSED",
+                        "CI smoke",
+                        "All checks passed",
+                        "details",
+                        "https://ci.example.com/run/7",
+                        "admin",
+                        java.time.Instant.parse("2026-04-02T09:00:00Z")
+                )));
+
+        mockMvc.perform(get("/api/v1/reviews/1/versions/100/test-runs").with(auth("admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data[0].name").value("CI smoke"))
+                .andExpect(jsonPath("$.data[0].status").value("PASSED"));
+    }
+
+    @Test
+    void createReviewTestRun_passesRequestBodyToService() throws Exception {
+        stubNamespaceRoles("admin", List.of());
+        given(reviewSkillDetailAppService.createReviewTestRun(
+                1L,
+                100L,
+                new com.iflytek.skillhub.dto.CreateReviewTestRunRequest(
+                        com.iflytek.skillhub.domain.review.ReviewTestRunSource.MANUAL,
+                        com.iflytek.skillhub.domain.review.ReviewTestRunStatus.WARNING,
+                        "Manual smoke",
+                        "Found one issue",
+                        "details",
+                        "https://ci.example.com/run/8"
+                ),
+                "admin",
+                Map.of()
+        )).willReturn(new ReviewTestRunResponse(
+                8L,
+                100L,
+                "MANUAL",
+                "WARNING",
+                "Manual smoke",
+                "Found one issue",
+                "details",
+                "https://ci.example.com/run/8",
+                "admin",
+                java.time.Instant.parse("2026-04-02T10:00:00Z")
+        ));
+
+        mockMvc.perform(post("/api/v1/reviews/1/versions/100/test-runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "source":"MANUAL",
+                                  "status":"WARNING",
+                                  "name":"Manual smoke",
+                                  "summary":"Found one issue",
+                                  "detailsMarkdown":"details",
+                                  "externalUrl":"https://ci.example.com/run/8"
+                                }
+                                """)
+                        .with(csrf())
+                        .with(auth("admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(8L))
+                .andExpect(jsonPath("$.data.source").value("MANUAL"));
+    }
+
+    @Test
     void listReviews_appliesRequestedTimeSortDirection() throws Exception {
         stubNamespaceRoles("admin", List.of());
         PageRequest pageable = PageRequest.of(
@@ -264,7 +460,16 @@ class ReviewPortalControllerTest {
     }
 
     private void stubReviewResponse(ReviewTask task) {
-        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(new ReviewTaskResponse(
+        ReviewTaskResponse response = toReviewTaskResponse(task);
+        given(governanceQueryRepository.getReviewTaskResponse(task)).willReturn(response);
+        given(governanceQueryRepository.getReviewTaskResponses(anyList()))
+                .willAnswer(invocation -> ((List<ReviewTask>) invocation.getArgument(0)).stream()
+                        .map(this::toReviewTaskResponse)
+                        .toList());
+    }
+
+    private ReviewTaskResponse toReviewTaskResponse(ReviewTask task) {
+        return new ReviewTaskResponse(
                 task.getId(),
                 task.getSkillVersionId(),
                 "team-a",
@@ -278,7 +483,7 @@ class ReviewPortalControllerTest {
                 task.getReviewComment(),
                 task.getSubmittedAt(),
                 task.getReviewedAt()
-        ));
+        );
     }
 
     private void stubNamespaceRoles(String userId, List<NamespaceMember> members) {
